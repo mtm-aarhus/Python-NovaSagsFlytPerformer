@@ -1,6 +1,7 @@
 import requests
 from OpenOrchestrator.orchestrator_connection.connection import OrchestratorConnection
 import uuid
+from datetime import datetime
 
 def get_access_token(orchestrator_connection: OrchestratorConnection):
     NovaToken = orchestrator_connection.get_credential("KMDAccessToken")
@@ -224,21 +225,26 @@ def update_caseworker_task(task, access_token, KMDNovaURL, new_caseworker):
         "caseUuid": "caseUuid",
         "taskTitle": "title",
         "taskDescription": "description",
+        "taskDeadline": "deadline",
+        "taskStartDate": "startDate",
+        "taskCloseDate": "closeDate",
+        "kle": "kle",
         "taskStatusCode": "statusCode",
         "taskType": "taskType",
-        "deadline": "deadline",
-        "startDate": "startDate",
-        "closeDate": "closeDate",
-        "kle": "kle",
         "taskRepeat": "taskRepeat",
     }
 
     # Extract and rename allowed fields
-    transformed_task = {
-        new_key: task.get(old_key)
-        for old_key, new_key in field_mapping.items()
-        if task.get(old_key) is not None
-    }
+    transformed_task = {}
+    for old_key, new_key in field_mapping.items():
+        if old_key == "taskType":
+            task_type_obj = task.get(old_key)
+            if isinstance(task_type_obj, dict):
+                transformed_task[new_key] = task_type_obj.get("taskTypeName")
+        else:
+            value = task.get(old_key)
+            if value is not None:
+                transformed_task[new_key] = value
 
     # Replace caseworker with only kspIdentity
     transformed_task["caseworker"] = {"kspIdentity": new_ksp_identity}
@@ -260,84 +266,53 @@ def update_caseworker_task(task, access_token, KMDNovaURL, new_caseworker):
     url = f"{KMDNovaURL}/Task/Update?api-version=2.0-Case"
     response = requests.put(url, headers=headers, json=payload)
     response.raise_for_status()
-    return response.status_code, response.json()
+    return response.status_code
 
-
-def patch_caseworker_racfId(task_uuid, novaUserid, access_token, KMDNovaURL):
+def create_task(case_uuid, new_caseworker, description, access_token, KMDNovaURL):
     """
-    Patch the RACF ID of a task's caseworker using the Task/Patch API.
-    Only the RACF ID (CaseworkerPersonIdent) is updated.
-    The UUID and transactionId must be sent as query parameters.
+    Imports a new task using the KMD Nova API.
+
+    Parameters:
+        case_uuid (str): UUID of the related case.
+        new_caseworker (dict): Dictionary containing 'kspIdentity' info (from lookup_caseworker_by_racfId).
+        description (str): Description of the task.
+        access_token (str): Bearer token for authorization.
+        KMDNovaURL (str): Base URL of the KMD Nova API.
+
+    Returns:
+        dict: JSON response from the API.
     """
-    transaction_id = str(uuid.uuid4())
-    url = f"{KMDNovaURL}/Task/PatchTask?id={task_uuid}&transactionId={transaction_id}&api-version=2.0-Case"
 
-    payload = {
-        "patchEntity": [
-            {
-                "path": "CaseworkerPersonIdent",
-                "op": "Replace",
-                "value": novaUserid
-            }
-        ]
-    }
+    ksp_identity = new_caseworker.get("kspIdentity")
+    if not ksp_identity:
+        raise ValueError("new_caseworker must contain 'kspIdentity'")
 
+    url = f"{KMDNovaURL}/Task/Import?api-version=2.0-Case"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {access_token}"
     }
 
-    response = requests.patch(url, headers=headers, json=payload)
-    response.raise_for_status()
-
-    return response.status_code, response.json()
-
-def test_patch_caseworker_racfId(task_uuid, new_caseworker, access_token, KMDNovaURL):
-    """
-    Tries all possible identifiers for the 'CaseworkerPersonIdent' patch operation.
-    Attempts patching using: novaUserId, racfId, fkUuid.
-    """
-    ksp_identity = new_caseworker.get("kspIdentity", {})
-    fk_org_identity = new_caseworker.get("fkOrgIdentity", {})
-    
-    test_values = {
-        "novaUserId": ksp_identity.get("novaUserId"),
-        "racfId": ksp_identity.get("racfId"),
-        "fkUuid": fk_org_identity.get("fkUuid")
+    payload = {
+        "common": {
+            "transactionId": str(uuid.uuid4()),
+            "uuid": case_uuid
+        },
+        "caseUuid": case_uuid,
+        "title": "99. Overført sag",
+        "description": description,
+        "startDate": datetime.now().isoformat(),
+        "statusCode": "N",  # Default to "New"
+        "taskTypeName": "Aktivitet",
+        "caseworker": {
+            "kspIdentity": ksp_identity
+        }
     }
 
-    transaction_id = str(uuid.uuid4())
-    
-    for label, value in test_values.items():
-        if not value:
-            continue
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    return response.status_code
 
-        url = f"{KMDNovaURL}/Task/PatchTask?id={task_uuid}&transactionId={transaction_id}&api-version=2.0-Case"
-        payload = {
-            "patchEntity": [
-                {
-                    "path": "CaseworkerPersonIdent",
-                    "op": "Replace",
-                    "value": value
-                }
-            ]
-        }
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {access_token}"
-        }
-
-        print(f"\n🔄 Trying patch with {label} = {value}")
-        try:
-            response = requests.patch(url, headers=headers, json=payload)
-            response.raise_for_status()
-            print(f"✅ Success with {label}: {response.status_code}")
-            print(response.json())
-            print("success?")
-        except requests.HTTPError as e:
-            print(f"❌ Failed with {label}: {e.response.status_code}")
-            print(e.response.json())
 
 
 def update_caseworker_case(case_uuid, new_caseworker, access_token, KMDNovaURL):
@@ -351,14 +326,13 @@ def update_caseworker_case(case_uuid, new_caseworker, access_token, KMDNovaURL):
 
     payload = {
         "common": {
-            "transactionId": str(uuid.uuid4())
+            "transactionId": str(uuid.uuid4()),
+            "uuid": case_uuid
         },
-        "case": {
-            "caseUuid": case_uuid,
-            "caseworker": {
-                "kspIdentity": ksp_identity
-            }
+        "caseworker": {
+            "kspIdentity": ksp_identity
         }
+    
     }
 
     headers = {
@@ -367,12 +341,13 @@ def update_caseworker_case(case_uuid, new_caseworker, access_token, KMDNovaURL):
     }
 
     url = f"{KMDNovaURL}/Case/Update?api-version=2.0-Case"
-    
-    print(f"Case: {payload}")
 
-    # response = requests.patch(url, headers=headers, json=payload)
-    # response.raise_for_status()
+    try:
+        response = requests.patch(url, headers=headers, json=payload)
+    except:
+        print(f"Failed for {case_uuid}, check if succesful")
+    response.raise_for_status()
 
-    # return response.status_code, response.json()
+    return response.status_code
 
 
