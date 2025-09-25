@@ -1,3 +1,42 @@
+# Nova Sagsflyt — Caseworker Reassignment Pipeline
+
+## Overview
+
+This automation handles the transfer of cases and tasks in KMD Nova when a caseworker goes on temporary or permanent leave. It ensures that active work is properly reassigned, and that the new caseworker is made aware of their responsibilities.
+
+---
+
+## Process Description
+
+1. **Fetch Case**
+   The process retrieves the case using the provided *Sagsnummer* and verifies that it is currently owned by the **old caseworker**.
+
+2. **Lookup New Caseworker**
+   The new caseworker is identified by their RACF/AD identifier. To minimize unnecessary API calls, the process keeps an in-memory cache of lookups for the duration of a run. If the same new caseworker is requested again, the cached result is reused instead of performing another lookup.
+
+3. **Reassign Active Tasks**
+   All tasks belonging to the old caseworker that are still active (not closed) are reassigned to the **new caseworker**.
+
+4. **Reassign the Case**
+   Ownership of the case itself is transferred from the old caseworker to the new one.
+
+5. **Create Notification Task**
+   A notification task is created on the case for the new caseworker. This task informs them that the case has been transferred and reminds them to review the case and reassign assistants on tasks if needed.
+
+---
+
+## Key Points
+
+* **Active tasks only:** Closed tasks remain unchanged; only open ones are moved.
+* **Caseworker cache:** Each new caseworker lookup is performed only once per run. Repeated references to the same RACF ID reuse cached data.
+* **Notification:** The newly assigned caseworker always receives a task reminding them to review the case and delegate assistants if necessary.
+
+---
+
+## Purpose
+
+This pipeline ensures continuity of case handling during staff changes, reduces manual reassignment work, and improves clarity for the receiving caseworker by explicitly notifying them of their new responsibilities.
+
 # Robot-Framework V3
 
 This repo is meant to be used as a template for robots made for [OpenOrchestrator](https://github.com/itk-dev-rpa/OpenOrchestrator).
