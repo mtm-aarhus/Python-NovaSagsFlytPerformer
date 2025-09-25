@@ -15,7 +15,7 @@ This automation handles the transfer of cases and tasks in KMD Nova when a casew
    The new caseworker is identified by their RACF/AD identifier. To minimize unnecessary API calls, the process keeps an in-memory cache of lookups for the duration of a run. If the same new caseworker is requested again, the cached result is reused instead of performing another lookup.
 
 3. **Reassign Active Tasks**
-   All tasks belonging to the old caseworker that are still active (not closed) are reassigned to the **new caseworker**.
+   All tasks on the case belonging to the old caseworker that are still active (not closed) are reassigned to the **new caseworker**.
 
 4. **Reassign the Case**
    Ownership of the case itself is transferred from the old caseworker to the new one.
